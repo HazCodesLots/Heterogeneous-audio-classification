@@ -1,0 +1,20 @@
+# Data and Embeddings
+data/
+
+# PyTorch Lightning Logs
+lightning_logs/
+results/
+
+# Python Cache
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Virtual Environments
+venv/
+env/
+.env
+
+# OS Files
+.DS_Store
+Thumbs.db
