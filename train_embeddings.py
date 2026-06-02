@@ -3,30 +3,28 @@ import argparse
 import warnings
 import logging
 
-# Suppress PyTree and general warnings
 warnings.filterwarnings("ignore")
 logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
 
-# Suppress Torch/Triton flop counter warnings (W0529...)
 os.environ["TORCH_CPP_LOG_LEVEL"] = "ERROR"
 os.environ["TORCH_LOGS"] = "-all"
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 import torch
 import torch.nn as nn
-from model import BST_CLASSES
+from train.model import BST_CLASSES
 
 from dataset_embeddings import EmbeddingDataModule
 from lightning_module import BSTLightningModule
 
 class AttentionFusionClassifier(nn.Module):
-    def __init__(self, use_panns=False, use_text=False, use_ast=False, hidden_dim=512, num_classes=23, dropout=0.3):
+    def __init__(self, use_panns=False, use_text=False, use_ast=False, use_wavlm=False, hidden_dim=512, num_classes=23, dropout=0.3):
         super().__init__()
         self.use_panns = use_panns
         self.use_text = use_text
         self.use_ast = use_ast
+        self.use_wavlm = use_wavlm
         
-        # Project each modality to a common hidden dimension
         self.proj_clap = nn.Linear(512, hidden_dim)
         if use_panns:
             self.proj_panns = nn.Linear(2048, hidden_dim)
@@ -34,17 +32,18 @@ class AttentionFusionClassifier(nn.Module):
             self.proj_text = nn.Linear(512, hidden_dim)
         if use_ast:
             self.proj_ast = nn.Linear(768, hidden_dim)
+        if use_wavlm:
+            self.proj_wavlm = nn.Linear(1024, hidden_dim)
             
-        # Attention layer to fuse modalities dynamically
-        self.attn = nn.TransformerEncoderLayer(
+        encoder_layer = nn.TransformerEncoderLayer(
             d_model=hidden_dim, 
             nhead=8, 
             dim_feedforward=hidden_dim * 4, 
             dropout=dropout, 
             batch_first=True
         )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=1)
         
-        # Very strong Residual MLP classifier
         self.fc1 = nn.Linear(hidden_dim, hidden_dim)
         self.ln1 = nn.LayerNorm(hidden_dim)
         
@@ -71,10 +70,8 @@ class AttentionFusionClassifier(nn.Module):
         self.head = nn.Linear(hidden_dim, num_classes)
 
     def forward(self, x):
-        # x is the concatenated vector from the dataloader
-        # We slice it back out and project each to hidden_dim
         idx = 512
-        tokens = [self.proj_clap(x[:, :idx]).unsqueeze(1)] # (Batch, 1, hidden_dim)
+        tokens = [self.proj_clap(x[:, :idx]).unsqueeze(1)]
         
         if self.use_panns:
             tokens.append(self.proj_panns(x[:, idx:idx+2048]).unsqueeze(1))
@@ -86,18 +83,20 @@ class AttentionFusionClassifier(nn.Module):
             
         if self.use_ast:
             tokens.append(self.proj_ast(x[:, idx:idx+768]).unsqueeze(1))
+            idx += 768
             
-        # Stack modalities into a sequence: (Batch, Num_Modalities, hidden_dim)
+        if self.use_wavlm:
+            tokens.append(self.proj_wavlm(x[:, idx:idx+1024]).unsqueeze(1))
+            
         seq = torch.cat(tokens, dim=1)
         
-        # Let them attend to each other
-        seq = self.attn(seq)
+        # Pass through Transformer
+        seq = self.transformer(seq)
         
-        # Mean pool across modalities to get the fused representation
-        fused = seq.mean(dim=1)
+        # Mean Pooling over all modalities (Extremely robust regularizer)
+        pooled = seq.mean(dim=1)
         
-        # Residual Classifier
-        out = self.act(self.ln1(self.fc1(fused)))
+        out = self.act(self.ln1(self.fc1(pooled)))
         out = out + self.res1(out)
         out = self.act(out)
         out = out + self.res2(out)
@@ -118,22 +117,17 @@ class JSONMetricsCallback(pl.Callback):
         self.metrics_history = []
         
     def on_validation_epoch_end(self, trainer, pl_module):
-        # PyTorch Lightning does a 'sanity check' validation before training starts. We ignore it.
         if trainer.sanity_checking:
             return
             
-        # Ensure the directory exists
         os.makedirs(os.path.dirname(self.output_file), exist_ok=True)
         
-        # Grab all accumulated metrics (train loss, val loss, hF, learning rate, etc)
         current_metrics = {"epoch": trainer.current_epoch}
         for k, v in trainer.callback_metrics.items():
-            # Convert tensors to standard Python floats for JSON serialization
             current_metrics[k] = v.item() if hasattr(v, "item") else v
             
         self.metrics_history.append(current_metrics)
         
-        # Overwrite the JSON file with the newly updated list
         with open(self.output_file, 'w') as f:
             json.dump(self.metrics_history, f, indent=4)
 
@@ -146,6 +140,7 @@ def main():
     parser.add_argument("--panns_dir", type=str, nargs='+', default=None, help="PANNs embeddings directories (optional)")
     parser.add_argument("--text_dir", type=str, nargs='+', default=None, help="CLAP text embeddings directories (optional)")
     parser.add_argument("--ast_dir", type=str, nargs='+', default=None, help="AST audio embeddings directories (optional)")
+    parser.add_argument("--wavlm_dir", type=str, nargs='+', default=None, help="Paths to WavLM (BEATs) embeddings")
     parser.add_argument("--output_dir", type=str, default="results/Embeddings_Run")
     
     parser.add_argument("--epochs",          type=int,   default=120)
@@ -155,7 +150,8 @@ def main():
     parser.add_argument("--coarse_weight",   type=float, default=0.3)
     parser.add_argument("--dropout",         type=float, default=0.3)
     parser.add_argument("--noise_std",        type=float, default=0.0,  help="Gaussian noise std dev for embedding augmentation")
-    parser.add_argument("--mask_prob",        type=float, default=0.0,  help="Probability of randomly zeroing an embedding dimension")
+    parser.add_argument("--mask_prob", type=float, default=0.1, help="Probability of zeroing out elements")
+    parser.add_argument("--mixup_alpha", type=float, default=0.0, help="Alpha for Mixup augmentation (e.g. 0.3)")
     parser.add_argument("--holdout_ratio",    type=float, default=-1.0, help="If >0, bypass K-fold and use this fraction as holdout val set (e.g. 0.1 = 90/10 split)")
     
     parser.add_argument("--seed",                 type=int,   default=42)
@@ -167,13 +163,13 @@ def main():
     pl.seed_everything(args.seed, workers=True)
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # 1. Setup DataModule
     datamodule = EmbeddingDataModule(
         csv_paths=args.csv_path,
         clap_dirs=args.emb_dir,
         panns_dirs=args.panns_dir,
         text_dirs=args.text_dir,
         ast_dirs=args.ast_dir,
+        wavlm_dirs=args.wavlm_dir,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         fold=args.fold,
@@ -186,34 +182,32 @@ def main():
     datamodule.setup()
     class_weights = datamodule.class_weights
 
-    # 2. Build Model Architecture
     use_panns = args.panns_dir is not None
     use_text = args.text_dir is not None
     use_ast = args.ast_dir is not None
+    use_wavlm = args.wavlm_dir is not None
         
     net = AttentionFusionClassifier(
         use_panns=use_panns, 
         use_text=use_text, 
         use_ast=use_ast,
+        use_wavlm=use_wavlm,
         hidden_dim=512, 
         num_classes=len(BST_CLASSES), 
         dropout=args.dropout
     )
     print(f"Trainable Parameters: {sum(p.numel() for p in net.parameters() if p.requires_grad):,}")
 
-    # 3. Setup Lightning Module
-    # Re-using the exact same lightning module with ReduceLROnPlateau and hierarchical loss!
     module = BSTLightningModule(
         model=net,
         lr=args.lr,
-        warmup_epochs=5,
-        mixup_alpha=0.0, # no mixup for embeddings right now
+        spec_augment=False,
+        mixup_alpha=args.mixup_alpha,
         label_smoothing=args.label_smoothing,
         class_weights=class_weights,
         coarse_weight=args.coarse_weight,
     )
 
-    # 4. Callbacks & Trainer
     checkpoint_callback = ModelCheckpoint(
         dirpath=os.path.join(args.output_dir, f"fold{args.fold}"),
         filename="best_model-{epoch:02d}-{val_hF:.4f}",
@@ -234,7 +228,6 @@ def main():
         logger=True,
     )
 
-    # 5. Train
     trainer.fit(model=module, datamodule=datamodule)
 
 if __name__ == "__main__":

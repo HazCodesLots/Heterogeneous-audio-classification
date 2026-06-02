@@ -53,26 +53,22 @@ def hierarchical_precision_recall_f(
         anc_pred = _ancestor_sets(pred)
 
         if gt == pred:
-            # Perfect prediction
             overlap = len(anc_gt)
         else:
-            # Check top-level match
+
             top_gt   = BST_CLASSES[gt].split("-")[0]
             top_pred = BST_CLASSES[pred].split("-")[0]
             if top_gt == top_pred:
-                # Same top-level parent — partial credit
-                overlap = lam * 1  # one ancestor (top level) in common
+
+                overlap = lam * 1
             else:
                 overlap = 0.0
 
-        # Precision: credit goes to the *predicted* class bucket
         hP_per[pred]      += overlap / max(len(anc_pred), 1)
-        # Recall: credit goes to the *true* class bucket
         hR_per[gt]        += overlap / max(len(anc_gt),   1)
         counts_gt[gt]     += 1
         counts_pred[pred] += 1
 
-    # Average within each class, then macro-average
     valid_gt   = counts_gt   > 0
     valid_pred = counts_pred > 0
     hP_c = np.where(valid_pred, hP_per / np.maximum(counts_pred, 1), 0.0)

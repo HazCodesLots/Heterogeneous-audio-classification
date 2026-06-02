@@ -18,7 +18,6 @@ def extract_text_embeddings(csv_paths, output_dirs, device="cuda"):
         
         df = pd.read_csv(csv_path)
         
-        # Batch size for processing text
         batch_size = 64
         
         with torch.no_grad():
@@ -36,12 +35,10 @@ def extract_text_embeddings(csv_paths, output_dirs, device="cuda"):
                     if os.path.exists(out_file):
                         continue
                         
-                    # Build text description from title, tags, and description
                     title = str(row.get('title', '')).strip()
                     tags = str(row.get('tags', '')).replace(',', ' ').strip()
                     desc = str(row.get('description', '')).strip()
                     
-                    # Truncate desc if it's too long just to be safe
                     text = f"{title}. {tags}. {desc}"[:512]
                     
                     texts.append(text)
@@ -51,15 +48,12 @@ def extract_text_embeddings(csv_paths, output_dirs, device="cuda"):
                 if not texts:
                     continue
                     
-                # Process texts
                 inputs = processor(text=texts, return_tensors="pt", padding=True, truncation=True)
                 inputs = {k: v.to(device) for k, v in inputs.items()}
                 
-                # Extract embeddings
                 outputs = model(**inputs)
-                text_embeds = outputs.text_embeds.cpu().numpy() # Shape: (batch_size, 512)
+                text_embeds = outputs.text_embeds.cpu().numpy()
                 
-                # Save to disk
                 for idx_in_batch, sound_id in enumerate(sound_ids):
                     out_file = os.path.join(output_dir, f"{sound_id}.npy")
                     np.save(out_file, text_embeds[idx_in_batch])

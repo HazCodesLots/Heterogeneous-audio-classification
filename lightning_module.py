@@ -48,15 +48,10 @@ class BSTLightningModule(pl.LightningModule):
         self.coarse_weight = coarse_weight
         self.strict_loading = False
 
-        # Register child->parent mapping as buffer so it auto-moves to GPU
         fine_to_coarse = torch.tensor(FINE_TO_COARSE, dtype=torch.long)
         self.register_buffer("fine_to_coarse", fine_to_coarse)
 
-        # PyTorch Lightning expects self.save_hyperparameters() but we pass a complex model object.
-        # We'll just ignore the model itself from hparams.
         self.save_hyperparameters(ignore=['model', 'class_weights'])
-
-        # We must register class_weights as a buffer so it moves to the correct device automatically
         if class_weights is not None:
             self.register_buffer("class_weights", class_weights)
         else:
@@ -73,7 +68,6 @@ class BSTLightningModule(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         inputs, labels, confidences, _ = batch
 
-        # Apply SpecAugment time masking to raw waveforms before feeding to model
         if self.use_spec_augment and inputs.ndim == 2:
             inputs = spec_augment(inputs)
 
@@ -81,10 +75,10 @@ class BSTLightningModule(pl.LightningModule):
             inputs, labels_a, labels_b, lam = mixup_batch(inputs, labels, alpha=self.mixup_alpha)
             logits = self(inputs)
             fine_loss = mixup_criterion(self.criterion, logits, labels_a, labels_b, lam)
-            # Coarse labels for mixup
+
             coarse_a = self.fine_to_coarse[labels_a]
             coarse_b = self.fine_to_coarse[labels_b]
-            # Aggregate fine logits to coarse logits via sum-pooling
+
             coarse_logits = self._fine_to_coarse_logits(logits)
             coarse_loss = mixup_criterion(self.coarse_criterion, coarse_logits, coarse_a, coarse_b, lam)
         else:
@@ -142,23 +136,19 @@ class BSTLightningModule(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=1e-4)
 
-        # We use ReduceLROnPlateau instead of cosine decay.
-        # To preserve the warmup phase, we start with a very small LR and
-        # manually ramp it up for the first `warmup_epochs` using on_train_epoch_start.
-        # The optimizer is initialized with the final warmup LR target.
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
-            mode='max',      # We are maximizing val_hF
-            factor=0.5,      # Halve the LR each time it plateaus
-            patience=5,      # Wait 5 non-improving epochs before cutting
-            min_lr=1e-7,     # Never drop below this floor
+            mode='max',
+            factor=0.5,
+            patience=5,
+            min_lr=1e-7,
         )
 
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "monitor": "val_hF",  # Reacts to validation hF score
+                "monitor": "val_hF",
                 "interval": "epoch",
                 "frequency": 1,
             },

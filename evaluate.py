@@ -20,10 +20,6 @@ from dataset import MelSpectrogramTransform, MAX_FRAMES, SAMPLE_RATE, _load_wave
 from metrics import hierarchical_precision_recall_f, top_level_accuracy, second_level_accuracy
 
 
-# ---------------------------------------------------------------------------
-# Eval-only dataset (no labels required)
-# ---------------------------------------------------------------------------
-
 class EvalDataset(Dataset):
     """Loads unlabelled audio files from a directory for inference."""
     def __init__(self, audio_dir: str, return_waveform: bool = False):
@@ -47,8 +43,6 @@ class EvalDataset(Dataset):
         
         if self.return_waveform:
             T = waveform.shape[-1]
-            # MAX_SAMPLES is 32000 * 30 = 960000. It's imported as MAX_SAMPLES? No, not yet.
-            # Let's import MAX_SAMPLES from dataset
             from dataset import MAX_SAMPLES
             if T > MAX_SAMPLES:
                 waveform = waveform[:MAX_SAMPLES]
@@ -71,16 +65,13 @@ def eval_collate(batch):
     return torch.stack(items), list(ids)
 
 
-# ---------------------------------------------------------------------------
-# Labelled evaluation (when ground truth CSV is available)
-# ---------------------------------------------------------------------------
 
 class LabelledEvalDataset(EvalDataset):
     def __init__(self, csv_path: str, audio_dir: str, return_waveform: bool = False):
         super().__init__(audio_dir, return_waveform=return_waveform)
         df = pd.read_csv(csv_path)
         from model import CLASS_TO_IDX
-        # Map the class string to contiguous 0-22 label
+
         labels = df["class"].map(CLASS_TO_IDX).astype(int)
         self.label_map = dict(zip(df["sound_id"].astype(str), labels))
 
@@ -94,10 +85,6 @@ def labelled_collate(batch):
     items, ids, labels = zip(*batch)
     return torch.stack(items), list(ids), torch.tensor(labels, dtype=torch.long)
 
-
-# ---------------------------------------------------------------------------
-# Inference
-# ---------------------------------------------------------------------------
 
 @torch.no_grad()
 def run_inference(model, loader, device):
@@ -116,9 +103,6 @@ def run_inference(model, loader, device):
     return all_ids, np.array(all_preds), np.array(all_scores)
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 def main():
     p = argparse.ArgumentParser(description="DCASE 2026 Task 1 — inference & evaluation")
