@@ -106,7 +106,6 @@ def main():
     )
     
     import glob
-    # 3. Find and Load all Checkpoints in Directory (recursively)
     ckpt_files = glob.glob(os.path.join(args.ckpt_dir, "**", "*.ckpt"), recursive=True)
     if not ckpt_files:
         raise ValueError(f"No .ckpt files found in {args.ckpt_dir}")
@@ -122,14 +121,12 @@ def main():
         model.eval()
         models.append(model)
 
-    # 4. Ensemble Inference Loop
     all_sound_ids = []
     all_preds = []
     
     for emb, sound_id in tqdm(loader, desc="Generating Ensemble Predictions"):
         emb = emb.to(device)
         
-        # Average the raw logits across all models
         ensemble_logits = torch.zeros(emb.size(0), len(BST_CLASSES), device=device)
         for model in models:
             ensemble_logits += model(emb)

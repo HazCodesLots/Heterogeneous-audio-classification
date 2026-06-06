@@ -21,12 +21,9 @@ from torch.utils.data import Dataset
 
 from train.model import BST_CLASSES, CLASS_TO_IDX
 
-# On Windows, num_workers > 0 requires __main__ guard and causes RAM/deadlock issues.
 DEFAULT_NUM_WORKERS = 0 if platform.system() == "Windows" else 4
 
-# ---------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
 
 MAX_DURATION_S = 30.0
 SAMPLE_RATE    = 32_000
@@ -34,9 +31,7 @@ MAX_SAMPLES    = int(MAX_DURATION_S * SAMPLE_RATE)             # 960,000 samples
 MAX_FRAMES     = int(np.ceil(MAX_DURATION_S * SAMPLE_RATE / 256))  # 3,750 mel frames
 MIN_SAMPLES    = 1024   # n_fft — clips shorter than this get zero-padded
 
-# ---------------------------------------------------------------------------
 # Waveform loader (torchaudio)
-# ---------------------------------------------------------------------------
 
 def _load_waveform(path: str) -> torch.Tensor:
     """Load audio → mono → resample to SAMPLE_RATE → truncate to MAX_SAMPLES.
@@ -69,9 +64,7 @@ def _load_waveform(path: str) -> torch.Tensor:
     return waveform  # (T,)
 
 
-# ---------------------------------------------------------------------------
 # Audio transforms
-# ---------------------------------------------------------------------------
 
 class MelSpectrogramTransform:
     """Log-mel spectrogram using torchaudio (pure tensor, no numpy)."""
@@ -80,6 +73,7 @@ class MelSpectrogramTransform:
                  hop_length: int = 256, n_mels: int = 128,
                  fmin: float = 20.0, fmax: float = 16_000.0,
                  top_db: float = 80.0, eps: float = 1e-6):
+        # standard mel-spectrogram processing
         self.sample_rate = sample_rate
         self.eps = eps
         self.mel   = TA.MelSpectrogram(
@@ -96,6 +90,7 @@ class MelSpectrogramTransform:
         mel_db = mel_db.clamp(min=-80.0)
         return (mel_db - mel_db.mean()) / (mel_db.std() + self.eps)
 
+# Augmentation to promote generalization and prevent memorization/overfitting
 
 class SpecAugment:
     """Time and frequency masking applied per-sample."""
@@ -145,9 +140,7 @@ class WaveformAugment:
         return waveform
 
 
-# ---------------------------------------------------------------------------
 # Dataset
-# ---------------------------------------------------------------------------
 
 class BSTDataset(Dataset):
     """
@@ -251,9 +244,7 @@ class BSTDataset(Dataset):
         return self.df.groupby("class")["label"].count().to_dict()
 
 
-# ---------------------------------------------------------------------------
-# Collate
-# ---------------------------------------------------------------------------
+# Collate // handles variable length inputs by padding and cropping to not lose information
 
 def bst_collate(batch, max_frames: int = MAX_FRAMES, crop_frames: int | None = None,
                 max_samples: int = MAX_SAMPLES, crop_samples: int | None = None):
@@ -290,9 +281,7 @@ def bst_collate(batch, max_frames: int = MAX_FRAMES, crop_frames: int | None = N
     )
 
 
-# ---------------------------------------------------------------------------
-# K-fold cross-validation split
-# ---------------------------------------------------------------------------
+# K-fold cross-validation split \\ advised 5 fold cross validation by the organizers 
 
 class _SubsetBSTDataset(BSTDataset):
     """BSTDataset constructed from a pre-filtered DataFrame (no disk walk)."""

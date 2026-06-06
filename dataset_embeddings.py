@@ -19,11 +19,11 @@ class EmbeddingDataset(Dataset):
             if "confidence" in df.columns and confidence_threshold > 0:
                 df = df[df["confidence"] >= confidence_threshold]
                 
-            # Discard top-level/other
+            # Discard top-level/other // These are noisy and could make training worse
             s = df['class_idx'].astype(str)
             df = df[~((s.str.len() == 3) & (s.str.endswith('99') | s.str.endswith('00')))].copy()
             
-            # Add CLAP embedding path
+            # Add CLAP embedding path // all embeddings are processed from here
             df['clap_path'] = df['sound_id'].astype(str).str.strip().apply(lambda x: os.path.join(clap_dir, f"{x}.npy"))
             
             if panns_dirs is not None:
