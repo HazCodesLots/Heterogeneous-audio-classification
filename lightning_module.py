@@ -11,6 +11,7 @@ from metrics import hierarchical_precision_recall_f, top_level_accuracy, second_
 # ['m-sp','m-si','m-m', 'is-p','is-s','is-w','is-k','is-e',
 #  'sp-s','sp-c','sp-p', 'fx-o','fx-v','fx-m','fx-h','fx-a','fx-n','fx-ex','fx-el',
 #  'ss-n','ss-i','ss-u','ss-s']
+
 FINE_TO_COARSE = [0,0,0, 1,1,1,1,1, 2,2,2, 3,3,3,3,3,3,3,3, 4,4,4,4]
 NUM_COARSE = 5
 
