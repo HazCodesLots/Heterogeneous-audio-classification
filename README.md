@@ -23,7 +23,7 @@ To leverage massive-scale pre-training, the repository extracts feature vectors 
 *   **CLAP (Contrastive Language-Audio Pretraining)**: Extracts 512-dimensional representations of both the audio signal and textual metadata.
 *   **PANNs (Pre-trained Audio Neural Networks)**: A robust CNN backbone that provides 2048-dimensional audio features.
 
-### 2. SOTA Late-Fusion Classifier (Active Submission Model)
+### 2. Late-Fusion Classifier (Active Submission Model)
 *   **AttentionFusionClassifier (3-Modality Champion: [CLAP Audio, PANNs Audio, CLAP Text])**: A custom multi-modal fusion model used to combine these embeddings into a unified predictive space.
     * **Mechanism**: It projects each different heterogeneous embedding into a shared 512-dimensional subspace and treats them as a sequence of "tokens". 
     * **Self-Attention**: It passes the sequence through a **Transformer Encoder** to allow the acoustic models to align with the semantic text metadata.
